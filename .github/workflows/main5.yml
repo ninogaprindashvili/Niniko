@@ -1,0 +1,352 @@
+title: "Business Data Analytics. Practice Session"
+subtitle: "Customer Lifecycle Management: Churn Prediction - Classification"
+author: "University of Tartu"
+output:
+  prettydoc::html_pretty: null
+  highlight: github
+  html_document: default
+  html_notebook: default
+  github_document: default
+  theme: cayman
+---
+
+Today we will continue discussing customer lifecycle management. In particular we concentrate on the retention problem. Business data analytics can help you identify who is about to churn by training classification model.
+
+##Libraries
+
+During the lab session we will need the following libraries:
+
+```{r message=FALSE, warning=FALSE}
+library('tidyverse')
+library('data.table')
+
+library("party") # Decision Trees plotting
+
+library("rpart") # Another Decision Trees library
+library("rpart.plot") # Decision Trees plotting
+
+
+library("randomForest") # Random Forest
+```
+
+##Step 1: Data loading
+
+Let's load the data:
+
+```{r}
+dt <- read.csv(file.choose()) # churn.csv
+```
+
+```{r}
+View(dt)
+```
+
+And check the data type of each column
+
+```{r}
+sapply(dt, class)
+```
+
+##Step 2: Data cleaning and transformation
+
+Next step is to clean the data. It is necessary to take care of unknown values before performing the prediction task since we cant take into the account instances where values are missing. 
+
+Let's check the columns with NA values
+
+```{r}
+sapply(dt, function(x) sum(is.na(x)))
+```
+
+Remove the rows with NA:
+
+```{r, include=FALSE}
+dt <- na.omit(dt)
+```
+
+```{r, eval=FALSE}
+dt <- <YOUR CODE>
+```
+
+Next we check the unique calues for each column
+
+```{r}
+func <- function(x) {
+  if(class(x) == "factor")
+  {
+    unique(x) 
+  } 
+  else
+  {
+    paste(min(x),"-", max(x))
+  }
+}
+sapply(dt[,-1], func)
+```
+
+Let us also remove the "customerId" variable as these values are all unique and won't contribute in the model.
+
+```{r, include=FALSE}
+dt$customerID <- NULL
+```
+
+```{r, eval=FALSE}
+<YOUR CODE>
+```
+
+Next, we need to change "No internet service" to "No" for the features "OnlineSecurity", #"OnlineBackup", "DeviceProtection", "TechSupport", "streamingTV", "streamingMovies" since "No internet service" and "No" bear the same meaning.
+
+```{r}
+for(i in c(10:15)) {
+  print(names(dt[i]))
+  dt[i][dt[i]=="No internet service"] <- "No"
+  dt[,i] <- factor(dt[,i])
+}
+```
+
+And we should also change "No phone service" to "No" for MultipleLines
+```{r, include=FALSE}
+dt$MultipleLines[dt$MultipleLines == "No phone service"] <- "No"
+dt$MultipleLines <- factor(dt$MultipleLines)
+```
+
+```{r, eval=FALSE}
+<YOUR CODE>
+```
+
+As a next step in data preparation because some models will not accept numeric values, we need to change them into Factors. So for columns (or variables) which have a few (or small number of) values we will  transform those columns (having integer values) into factors.
+For those columns which have higher number of unique values, we will transform them into bins.
+
+```{r}
+unique(dt$SeniorCitizen)
+```
+
+Just two values. We can turn this column to factor:
+
+```{r, include=FALSE}
+dt$SeniorCitizen <- as.factor(dt$SeniorCitizen)
+```
+
+```{r, eval=FALSE}
+dt$SeniorCitizen <- <YOUR CODE>
+```
+
+Next column at which we should look is "tenure". Lets plot it on the graph instead of just looking on the ranges:
+
+```{r, eval=FALSE}
+dt %>%
+  <YOUR CODE>
+```
+```{r, echo=FALSE}
+ggplot(dt, aes(x=tenure)) + geom_histogram(fill='#8b3840', color='grey60', binwidth = 1) + theme_bw()
+```
+
+
+Above we can see the distribution and range of the values however, we will use summary command to select intervals which would be more representative (discussed in Lab 3 also)
+
+(Refer to Lab 3 for help)
+ 
+Let's create groups based on next values:
+
+```{r}
+summary(dt$tenure)
+```
+
+```{r, include=FALSE}
+dt <- mutate(dt, tenure = cut(tenure, breaks = c(0,9,29,33,55,72)))
+unique(dt$tenure)
+```
+
+```{r, eval=FALSE}
+dt <- mutate(dt, tenure = <YOUR CODE>)
+unique(dt$tenure)
+```
+
+Now only two columns with type "numeric" left. 
+We can either split the data into groups the save way we did with "tenure" or just ignore them while creating the model.
+However, ignoring features may decreese quality of the model. That is why we will split thouse columns as well.
+
+But befor we start, lets plot the values for features "MonthlyCharges" and "TotalCharges":
+```{r, eval=FALSE}
+dt %>%
+  <YOUR CODE>
+```
+```{r, echo=FALSE}
+ggplot(dt, aes(x=MonthlyCharges)) + geom_histogram(fill='#8b3840', color='grey60', binwidth = 1) + theme_bw()
+```
+
+```{r, eval=FALSE}
+dt %>%
+  <YOUR CODE>
+```
+```{r, echo=FALSE}
+ggplot(dt, aes(x=TotalCharges)) + geom_histogram(fill='#8b3840', color='grey60', binwidth = 30) + theme_bw()
+```
+
+The plots looks similar. Let's check correlation between those features:
+
+```{r}
+cor(dt$MonthlyCharges, dt$TotalCharges)
+```
+
+So, by looking at correlation we can say that those features are dependent on each other.
+This gives us possability to keep only one of them, as having both of the features won't increase quality of our model that much.
+
+```{r}
+dt$TotalCharges <- NULL
+```
+
+Now let's split "MonthlyCharges":
+
+```{r}
+summary(dt$MonthlyCharges)
+```
+
+```{r, include=FALSE}
+dt <- mutate(dt, MonthlyCharges = cut(MonthlyCharges, breaks = c(17,36,60,71,90,119)))
+unique(dt$MonthlyCharges)
+```
+
+```{r, eval=FALSE}
+dt <- mutate(dt, MonthlyCharges = <YOUR CODE>)
+unique(dt$MonthlyCharges)
+```
+
+Now that we prepared the data, let's look at what we have:
+
+```{r}
+str(dt)
+```
+
+And also don't forget to check prepared data for NA values:
+
+```{r}
+sapply(dt, function(x) sum(is.na(x)))
+```
+
+## Step 3: Preparing test and training data
+
+Lets create training and test data.
+We will split the dataset like so:
+
+ *. 70% - train data
+ *. 30% - test data
+
+
+```{r, include=F}
+set.seed(999) 
+sample <- sample.int(n = nrow(dt), size = floor(0.7*nrow(dt)), replace = F)
+
+train <- dt[sample, ]
+test  <- dt[-sample, ]
+
+dim(train); dim(test)
+``` 
+```{r, eval=F}
+set.seed(999) 
+sample <- <YOUR CODE>
+
+train <- <YOUR CODE>
+test  <- <YOUR CODE>
+
+dim(train); dim(test)
+``` 
+
+##First Model: Generalized linear model (logistic regression)
+
+The first method that we will use is logistic regression:
+
+```{r}
+LogModel <- glm(Churn ~ ., family=binomial, data=train)
+summary(LogModel)
+```
+
+Now let's predict the scores:
+
+```{r}
+test$predict_glm <- predict(LogModel, newdata = test[, -19], type='response')
+```
+
+As result, we recived a scores. We have to round them to 1 or 0 depending on the threshold:
+
+```{r}
+ggplot(data = test, aes(x=predict_glm, fill=Churn)) + geom_density(alpha=0.3) + theme_bw()
+```
+
+
+```{r}
+test$predict_glm <- ifelse(test$predict_glm >0.3, 1, 0)
+```
+
+Now we will evaluate the model:
+
+Accuracy:
+
+```{r}
+misClasificError <- mean(test$predict_glm != as.numeric(test$Churn)-1)
+print(paste('Logistic Regression Accuracy',1-misClasificError))
+```
+
+## Second Model: Decision Tree
+
+Logistic regression is a simple and transparent model. Let's try something more powerful:
+
+### Way 1: with library "party"
+
+```{r}
+tree <- ctree(Churn~Contract+tenure+PaperlessBilling, train)
+plot(tree, type='simple')
+```
+
+Make prediction on Test dataset
+
+```{r}
+pred_tree <- predict(tree, test)
+```
+
+Accuracy of Decision tree model on Test dataset:
+
+```{r}
+misClasificError <- mean(pred_tree != test$Churn)
+print(paste('Decision Tree Accuracy',1-misClasificError))
+```
+
+### Way2: with library "rpart"
+
+```{r}
+tree2 <- rpart(data=train, Churn ~ Contract+tenure+PaperlessBilling, method='class')
+rpart.plot(tree2)
+```
+
+## Third Model: Random Forrest
+
+Create model with training data and see the confusion matrix 
+
+```{r}
+rfModel <- randomForest(Churn ~., data = train)
+print(rfModel)
+```
+
+Predict churn on the test dataset with the created model 
+
+```{r}
+pred_rf <- predict(rfModel, test)
+```
+
+Accuracy:
+
+```{r}
+misClasificError <- mean(pred_rf != test$Churn)
+print(paste('Random Forest Accuracy',1-misClasificError))
+```
+
+Plot model to check error dynamics for the different number of trees
+
+```{r}
+layout(matrix(c(1,2),nrow=1), width=c(4,1)) 
+par(mar=c(5,4,4,0)) #No margin on the right side
+plot(rfModel)
+par(mar=c(5,0,4,2)) #No margin on the left side
+plot(c(0,1), axes=F, xlab="", ylab="")
+legend("top", colnames(rfModel$err.rate),col=1:4,cex=0.8,fill=1:4)
+
+varImpPlot(rfModel, sort=T, n.var = 10, main = 'Top 10 Feature Importance')
